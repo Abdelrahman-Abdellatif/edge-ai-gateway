@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR BSD-3-Clause
+/*
+ * Edge-AI Maintenance Gateway - board variant of the STM32MP257F-DK
+ *
+ * Written against ST's kernel branch v6.6-stm32mp (OpenSTLinux Scarthgap).
+ * Pin numbers below are pins of the 40-pin GPIO connector
+ * (user manual, "GPIO connector pinout" table).
+ *
+ *   I2C2   SDA pin 27 (PF0)   SCL pin 28 (PF2)
+ *   SPI6   SCK  pin 23 (PF7)  MOSI pin 19 (PC7)  MISO pin 21 (PC4)
+ *   Display CS pin 24 (PF4)   Touch CS pin 32 (PA5)
+ *   Display DC pin 33 (PA1)   Display RESET pin 35 (PD0)
+ *   Touch IRQ pin 29 (PC10)   MPU-6050 INT pin 31 (PH8)
+ *   LED red pin 36 (PF15)     yellow pin 38 (PD1)   green pin 40 (PB5)
+ *
+ * Both I2C sensors use drivers that already exist in the kernel:
+ *   MPU-6050 -> inv_mpu6050 (IIO)     BMP180 -> bmp280 driver family (IIO)
+ */
+
+#include "stm32mp257f-dk.dts"
+
+/ {
+	model = "Abdelrahman Edge-AI Maintenance Gateway (STM32MP257F-DK)";
+
+	traffic_lights {
+		compatible = "gpio-leds";
+
+		led-red {
+			gpios = <&gpiof 15 GPIO_ACTIVE_HIGH>;	/* connector pin 36 */
+			color = <LED_COLOR_ID_RED>;
+			function = LED_FUNCTION_INDICATOR;
+			default-state = "off";
+		};
+
+		led-yellow {
+			gpios = <&gpiod 1 GPIO_ACTIVE_HIGH>;	/* connector pin 38 */
+			color = <LED_COLOR_ID_YELLOW>;
+			function = LED_FUNCTION_INDICATOR;
+			default-state = "off";
+		};
+
+		led-green {
+			gpios = <&gpiob 5 GPIO_ACTIVE_HIGH>;	/* connector pin 40 */
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_INDICATOR;
+			default-state = "off";
+		};
+	};
+};
+
+/*
+ * i2c2 is already enabled by the board file (pins, 400 kHz, pinctrl).
+ * Other chips already on this bus: 0x1a camera, 0x38/0x3c/0x3d/0x3f HDMI,
+ * 0x41 touch. Our addresses 0x68 and 0x77 do not collide with them.
+ */
+&i2c2 {
+	mpu6050: accelerometer@68 {
+		compatible = "invensense,mpu6050";
+		reg = <0x68>;
+		interrupt-parent = <&gpioh>;
+		interrupts = <8 IRQ_TYPE_EDGE_RISING>;	/* connector pin 31 */
+	};
+
+	bmp180: pressure-sensor@77 {
+		compatible = "bosch,bmp180";
+		reg = <0x77>;
+		vddd-supply = <&scmi_v3v3>;
+		vdda-supply = <&scmi_v3v3>;
+	};
+};
+
+/*
+ * spi6 pin muxing (SCK/MOSI/MISO) is already done by the board file
+ * (spi6_pins_a). Both chip-selects are plain GPIOs, so the SPI core
+ * toggles them itself.
+ */
+&spi6 {
+	cs-gpios = <&gpiof 4 GPIO_ACTIVE_LOW>,	/* pin 24: display CS */
+		   <&gpioa 5 GPIO_ACTIVE_LOW>;	/* pin 32: touch CS   */
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	display@0 {
+		compatible = "adafruit,yx240qv29", "ilitek,ili9341";
+		reg = <0>;
+		spi-max-frequency = <4000000>;
+		dc-gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;		/* pin 33 */
+		reset-gpios = <&gpiod 0 GPIO_ACTIVE_LOW>;	/* pin 35 */
+	};
+
+	touchscreen@1 {
+		compatible = "ti,tsc2046";
+		reg = <1>;
+		spi-max-frequency = <4000000>;
+		interrupt-parent = <&gpioc>;
+		interrupts = <10 IRQ_TYPE_EDGE_FALLING>;	/* pin 29 */
+		pendown-gpio = <&gpioc 10 GPIO_ACTIVE_LOW>;
+		vcc-supply = <&scmi_v3v3>;
+		ti,x-plate-ohms = /bits/ 16 <400>;
+		ti,pressure-max = /bits/ 16 <255>;
+	};
+};
